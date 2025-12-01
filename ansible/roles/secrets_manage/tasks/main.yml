@@ -1,0 +1,149 @@
+- name: Ensure sops binary is installed on control node
+  ansible.builtin.command: sops --version
+  delegate_to: localhost
+  register: sops_check
+  changed_when: false
+  failed_when: sops_check.rc != 0
+
+- name: Ensure host_vars directory exists for this host
+  ansible.builtin.file:
+    path: "{{ inventory_dir }}/host_vars/{{ inventory_hostname }}"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+
+- name: Ensure local key dir exists
+  ansible.builtin.file:
+    path: "{{ secrets_ansible_key_dir }}"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+
+- name: Load existing secrets if present
+  community.sops.load_vars:
+    file: "{{ secrets_file }}"
+    name: secrets_data
+  delegate_to: localhost
+  ignore_errors: true
+
+- name: Init secrets_data if undefined
+  ansible.builtin.set_fact:
+    secrets_data:
+      root_password: null
+      ssh_keys:
+        ansible:
+          private: null
+          public: null
+  when: secrets_data is not defined
+  delegate_to: localhost
+  no_log: true
+
+# --- ROOT PASSWORD ---
+
+- name: Ensure root password exists (or rotate if requested)
+  ansible.builtin.set_fact:
+    secrets_data: >-
+      {{
+        secrets_data | combine(
+          {
+            'root_password': (
+              (secrets_data.root_password
+               if (secrets_data.root_password is not none and not secrets_regen_root_password | bool)
+               else lookup(
+                 'community.general.random_string',
+                 length=secrets_root_password_length
+               )
+              )
+            )
+          },
+          recursive=True
+        )
+      }}
+  delegate_to: localhost
+  no_log: true
+
+# --- SSH KEYS FOR ANSIBLE USER ---
+
+- name: Define key paths for this host
+  ansible.builtin.set_fact:
+    host_key_base: "{{ secrets_ansible_key_dir }}/{{ inventory_hostname }}-{{ secrets_ansible_key_name }}"
+  delegate_to: localhost
+
+- name: Generate SSH keypair for ansible user if needed or rotation requested
+  community.crypto.openssh_keypair:
+    path: "{{ host_key_base }}"
+    type: "{{ secrets_ansible_key_type }}"
+    mode: "0600"
+  when: secrets_regen_ssh_keys | bool
+        or secrets_data.ssh_keys.ansible.private is none
+        or secrets_data.ssh_keys.ansible.public is none
+  delegate_to: localhost
+  register: generated_key
+
+- name: Ensure local private key file exists from secrets (if secrets already had key and no rotation)
+  ansible.builtin.copy:
+    dest: "{{ host_key_base }}"
+    content: "{{ secrets_data.ssh_keys.ansible.private }}"
+    mode: "0600"
+  when: not secrets_regen_ssh_keys | bool
+        and secrets_data.ssh_keys.ansible.private is not none
+  delegate_to: localhost
+  no_log: true
+
+- name: Ensure local public key file exists from secrets (if secrets already had key and no rotation)
+  ansible.builtin.copy:
+    dest: "{{ host_key_base }}.pub"
+    content: "{{ secrets_data.ssh_keys.ansible.public ~ '\n' }}"
+    mode: "0644"
+  when: not secrets_regen_ssh_keys | bool
+        and secrets_data.ssh_keys.ansible.public is not none
+  delegate_to: localhost
+  no_log: true
+
+- name: Read private key from file
+  ansible.builtin.set_fact:
+    host_private_key: "{{ lookup('file', host_key_base) }}"
+  delegate_to: localhost
+  no_log: true
+
+- name: Read or use generated public key
+  ansible.builtin.set_fact:
+    host_public_key: >-
+      {{
+        (generated_key.public_key
+         if (generated_key is defined and generated_key.public_key is defined)
+         else lookup('file', host_key_base + '.pub'))
+      }}
+  delegate_to: localhost
+  no_log: true
+
+- name: Update secrets_data with ssh keys
+  ansible.builtin.set_fact:
+    secrets_data: >-
+      {{
+        secrets_data | combine(
+          {
+            'ssh_keys': {
+              'ansible': {
+                'private': host_private_key,
+                'public': host_public_key
+              }
+            }
+          },
+          recursive=True
+        )
+      }}
+  delegate_to: localhost
+  no_log: true
+
+# --- WRITE BACK TO HOST SOPS FILE ---
+
+- name: "Write secrets to SOPS-encrypted file for {{ inventory_hostname }}"
+  community.sops.sops_encrypt:
+    path: "{{ secrets_file }}"
+    content_yaml: "{{ secrets_data }}"
+    force: true
+    config_path: "{{ inventory_dir | dirname }}/.sops.yaml"
+  delegate_to: localhost
+  no_log: true
+

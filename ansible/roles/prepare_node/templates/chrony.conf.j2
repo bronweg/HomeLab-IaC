@@ -1,0 +1,18 @@
+{% for server in chrony_ntp_servers %}
+pool {{ server }} iburst
+{% endfor %}
+
+{% for server in chrony_ntp_fallback_servers %}
+pool {{ server }} iburst
+{% endfor %}
+
+makestep 1.0 3
+
+driftfile /var/lib/chrony/chrony.drift
+rtcsync
+keyfile /etc/chrony/chrony.keys
+logdir /var/log/chrony
+
+allow 127.0.0.1
+allow ::1
+

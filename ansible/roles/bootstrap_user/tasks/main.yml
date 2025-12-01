@@ -1,0 +1,66 @@
+- name: Load secrets for this host from SOPS
+  community.sops.load_vars:
+    file: "{{ inventory_dir }}/host_vars/{{ inventory_hostname }}/secrets.sops.yml"
+    name: secrets_data
+    config_path: "{{ inventory_dir | dirname }}/.sops.yaml"
+  delegate_to: localhost
+  become: false
+
+- name: Ensure required packages are installed
+  ansible.builtin.package:
+    name:
+      - sudo
+      - python3
+      - python3-apt
+      - ssh
+    state: present
+
+- name: Create ansible user
+  ansible.builtin.user:
+    name: ansible
+    state: present
+    shell: /bin/bash
+    create_home: true
+    groups:
+      - sudo
+    append: true
+
+- name: Ensure .ssh directory exists for ansible user
+  ansible.builtin.file:
+    path: /home/ansible/.ssh
+    state: directory
+    owner: ansible
+    group: ansible
+    mode: "0700"
+
+- name: Install public key for ansible user
+  ansible.posix.authorized_key:
+    user: ansible
+    state: present
+    key: "{{ secrets_data.ssh_keys.ansible.public }}"
+
+- name: Grant sudo privileges to ansible user
+  ansible.builtin.copy:
+    dest: /etc/sudoers.d/ansible
+    content: "ansible ALL=(ALL) NOPASSWD: ALL\n"
+    mode: "0440"
+    owner: root
+    group: root
+    validate: "/usr/sbin/visudo -cf %s"
+
+- name: Harden sshd
+  ansible.builtin.copy:
+    dest: /etc/ssh/sshd_config.d/99-root-login.conf
+    content: |
+      PermitRootLogin prohibit-password
+      PasswordAuthentication no
+      PubkeyAuthentication yes
+    mode: "0644"
+  notify: Restart sshd
+
+- name: Set root password from secrets
+  ansible.builtin.user:
+    name: root
+    password: "{{ secrets_data.root_password | password_hash('sha512') }}"
+  no_log: true
+

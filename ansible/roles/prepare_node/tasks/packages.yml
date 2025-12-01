@@ -1,0 +1,23 @@
+- name: Install base CLI tools
+  ansible.builtin.package:
+    name:
+      - vim
+      - htop
+      - curl
+      - wget
+      - git
+      - net-tools
+      - iproute2
+    state: present
+
+- name: Install diagnostic and helper tools
+  ansible.builtin.package:
+    name:
+      - rsync
+      - lsof
+      - tcpdump
+      - dnsutils
+      - bash-completion
+    state: present
+  ignore_errors: true
+

@@ -1,0 +1,35 @@
+---
+# Safety check
+- name: Validate target argument
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Fail if target is not provided
+      ansible.builtin.fail:
+        msg: "You MUST run this playbook with -e target=<hostname_or_group>"
+      when: target is not defined
+
+- name: Bootstrap ansible user and root
+  hosts: "{{ target }}"
+  become: true
+  vars:
+    ansible_user: root
+  roles:
+    - role: secrets_manage
+      become: false
+      tags:
+        - "secrets"
+    - role: bootstrap_user
+      tags:
+        - "bootstrap"
+
+- name: Prepare baseline OS on nodes
+  hosts: "{{ target }}"
+  become: true
+  vars:
+    ansible_user: ansible
+    ansible_ssh_private_key_file: "{{ inventory_dir }}/keys/{{ inventory_hostname }}-ansible-bootstrap"
+  roles:
+    - role: prepare_node
+      tags:
+        - "prepare_os"

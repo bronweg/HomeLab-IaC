@@ -1,0 +1,144 @@
+---
+- name: Prepare local Ansible control node
+  hosts: localhost
+  gather_facts: true
+  become: false
+
+  vars:
+    sops_version: "v3.11.0"
+    sops_arch: "linux.amd64"
+    sops_url: "https://github.com/getsops/sops/releases/download/{{ sops_version }}/sops-{{ sops_version }}.{{ sops_arch }}"
+    age_keys_dir: "{{ lookup('env', 'HOME') + '/.config/sops/age' }}"
+    age_keys_file: "{{ age_keys_dir + '/keys.txt' }}"
+    project_root: "{{ playbook_dir | dirname }}"
+    sops_config_path: "{{ project_root + '/.sops.yaml' }}"
+
+  tasks:
+    - name: Ensure curl and sshpass are installed on Debian/Ubuntu
+      ansible.builtin.apt:
+        name:
+          - curl
+          - sshpass
+        state: present
+        update_cache: true
+      when: ansible_os_family == "Debian"
+      become: true
+
+    # --- SOPS detection / version check ---
+
+    - name: Check if sops is already installed
+      ansible.builtin.command: sops --version
+      register: sops_check
+      changed_when: false
+      failed_when: false
+
+    - name: Extract installed sops version (if present)
+      ansible.builtin.set_fact:
+        sops_installed_version: >-
+          {{
+            (sops_check.stdout
+             | regex_search('([0-9]+\.[0-9]+\.[0-9]+)', '\1'))
+            | default('0.0.0', true) | int
+          }}
+      when: sops_check.rc == 0
+
+    - name: Mark sops for install when not present
+      ansible.builtin.set_fact:
+        sops_need_install: true
+      when: sops_check.rc != 0
+
+    - name: Normalize required sops version string
+      ansible.builtin.set_fact:
+        sops_required_version: "{{ sops_version | regex_replace('^v', '') }}"
+
+    - name: Decide if sops needs upgrade
+      ansible.builtin.set_fact:
+        sops_need_install: "{{ sops_installed_version is version(sops_required_version, '<') }}"
+      when: sops_check.rc == 0
+
+    - name: Show sops current/desired versions (debug)
+      ansible.builtin.debug:
+        msg: "sops installed={{ sops_check.rc == 0 }}, current={{ sops_installed_version | default('none') }}, required={{ sops_required_version }}, need_install={{ sops_need_install | default('undefined') }}"
+
+    - name: Show sops current/desired versions (debug)
+      ansible.builtin.debug:
+        msg: "sops installed={{ sops_check.rc == 0 }}, current={{ sops_installed_version | default('none') }}, desired={{ sops_version }}"
+      when: sops_need_install | bool or sops_check.rc == 0
+
+    # --- SOPS install/upgrade ---
+
+    - name: Download sops binary when needed
+      ansible.builtin.get_url:
+        url: "{{ sops_url }}"
+        dest: /usr/local/bin/sops
+        mode: "0755"
+      when: sops_need_install | bool
+
+    - name: Verify sops is installed
+      ansible.builtin.command: sops --version
+      register: sops_verify
+      changed_when: false
+      failed_when: sops_verify.rc != 0
+
+    # --- AGE & keys ---
+
+    - name: Try to install age package on Debian/Ubuntu
+      ansible.builtin.apt:
+        name: age
+        state: present
+        update_cache: false
+      when: ansible_os_family == "Debian"
+      ignore_errors: true
+      become: true
+
+    - name: Ensure age keys directory exists
+      ansible.builtin.file:
+        path: "{{ age_keys_dir }}"
+        state: directory
+        mode: "0700"
+        owner: "{{ ansible_user_id }}"
+        group: "{{ ansible_user_gid }}"
+
+    - name: Generate age keypair if not exists
+      ansible.builtin.command: age-keygen -o "{{ age_keys_file }}"
+      args:
+        creates: "{{ age_keys_file }}"
+      register: age_keygen_result
+      changed_when: age_keygen_result.rc == 0
+      failed_when: age_keygen_result.rc != 0 and age_keygen_result.rc != 0
+      # If age-keygen is not available, this will fail -> install age manually or adjust logic
+
+    - name: Read age keys file
+      ansible.builtin.slurp:
+        path: "{{ age_keys_file }}"
+      register: age_keys_content
+
+    - name: Extract age public key from keys file
+      ansible.builtin.set_fact:
+        age_public_key: >-
+          {{
+            (age_keys_content.content | b64decode)
+            | regex_search('age[0-9a-z]+')
+            | default('', true)
+          }}
+
+    - name: Fail if age public key could not be extracted
+      ansible.builtin.fail:
+        msg: "Could not extract age public key from {{ age_keys_file }}"
+      when: age_public_key | length == 0
+
+    # --- .sops.yaml creation ---
+
+    - name: Create .sops.yaml in project root
+      ansible.builtin.copy:
+        dest: "{{ sops_config_path }}"
+        owner: "{{ ansible_user_id }}"
+        group: "{{ ansible_user_gid }}"
+        mode: "0644"
+        content: |
+          creation_rules:
+            - path_regex: .*
+              key_groups:
+                - age:
+                    - {{ age_public_key }}
+

@@ -1,0 +1,11 @@
+system_timezone: "Asia/Jerusalem"
+
+chrony_ntp_servers:
+  - 0.pool.ntp.org
+  - 1.pool.ntp.org
+  - 2.pool.ntp.org
+
+chrony_ntp_fallback_servers:
+  - time.google.com
+  - time.cloudflare.com
+

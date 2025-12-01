@@ -1,0 +1,12 @@
+secrets_file: "{{ inventory_dir }}/host_vars/{{ inventory_hostname }}/secrets.sops.yml"
+
+secrets_root_password_length: 24
+
+secrets_ansible_key_type: ed25519
+secrets_ansible_key_dir: "{{ inventory_dir }}/keys"
+secrets_ansible_key_name: "ansible-bootstrap"
+
+# Rotation flags
+secrets_regen_root_password: false
+secrets_regen_ssh_keys: false
+

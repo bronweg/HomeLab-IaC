@@ -1,0 +1,4 @@
+bootstrap_user_name: ansible
+bootstrap_user_groups:
+  - sudo
+
