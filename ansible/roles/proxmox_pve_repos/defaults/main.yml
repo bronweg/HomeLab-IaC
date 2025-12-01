@@ -1,0 +1,5 @@
+---
+# Default Debian codename for Proxmox PVE repository.
+# By default we use the distribution_release fact.
+# Override this variable in inventory or group_vars if needed.
+pve_debian_codename: "{{ ansible_facts.distribution_release | default(ansible_facts.lsb.codename) }}"

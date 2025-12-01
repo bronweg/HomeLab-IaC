@@ -1,0 +1,18 @@
+---
+# Safety check
+- name: Validate target argument
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Fail if target is not provided
+      ansible.builtin.fail:
+        msg: "You MUST run this playbook with -e target=<hostname_or_group>"
+      when: target is not defined
+
+- name: Configure PVE repositories on all Proxmox nodes
+  hosts: "{{ target }}"
+  become: true
+  gather_facts: true
+
+  roles:
+    - proxmox_pve_repos
