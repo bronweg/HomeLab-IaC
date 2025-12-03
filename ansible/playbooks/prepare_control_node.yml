@@ -23,6 +23,14 @@
         update_cache: true
       when: ansible_os_family == "Debian"
       become: true
+    
+    - name: Install Python dependencies for Proxmox modules on control node
+      ansible.builtin.pip:
+        name:
+          - proxmoxer
+          - requests
+        executable: pip3
+      become: true
 
     # --- SOPS detection / version check ---
 

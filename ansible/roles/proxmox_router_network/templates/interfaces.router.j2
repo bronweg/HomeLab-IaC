@@ -1,0 +1,30 @@
+# This file is managed by Ansible (role: proxmox_router_network)
+# Do not edit manually.
+
+auto lo
+iface lo inet loopback
+
+######## WAN physical interface ########
+auto {{ pve_wan_iface }}
+iface {{ pve_wan_iface }} inet manual
+
+auto vmbr-wan
+iface vmbr-wan inet manual
+    bridge-ports {{ pve_wan_iface }}
+    bridge-stp off
+    bridge-fd 0
+
+######## LAN trunk physical interface ########
+auto {{ pve_lan_iface }}
+iface {{ pve_lan_iface }} inet manual
+
+auto vmbr-lan
+iface vmbr-lan inet static
+    address {{ pve_mgmt_address }}
+    netmask {{ pve_mgmt_netmask }}
+    gateway {{ pve_mgmt_gateway }}
+    bridge-ports {{ pve_lan_iface }}
+    bridge-stp off
+    bridge-fd 0
+    bridge-vlan-aware yes
+    bridge-vids {{ pve_lan_vlans | join(' ') }}

@@ -1,0 +1,46 @@
+---
+# OpenWRT version and image flavor to use
+openwrt_version: "23.05.5"
+openwrt_image_flavor: "generic-ext4-combined"
+
+# Image filenames (compressed and raw)
+openwrt_image_filename_gz: "openwrt-{{ openwrt_version }}-x86-64-{{ openwrt_image_flavor }}.img.gz"
+openwrt_image_filename_raw: "{{ openwrt_image_filename_gz | regex_replace('\\.gz$', '') }}"
+
+# Download URL for the OpenWRT image
+openwrt_image_url: >-
+  https://downloads.openwrt.org/releases/{{ openwrt_version }}/targets/x86/64/{{ openwrt_image_filename_gz }}
+
+# Template basic metadata
+openwrt_template_vmid: 9000
+openwrt_template_name: "tpl-openwrt-{{ openwrt_version }}"
+openwrt_template_node: "{{ inventory_hostname }}"
+
+# Proxmox storages
+# `openwrt_download_storage_id` is only used as a logical storage name for import_from.
+# The file is actually downloaded into /var/lib/vz/images/<vmid>/ on the node.
+openwrt_download_storage_id: "local"
+openwrt_rootdisk_storage_id: "local-lvm"
+
+# Directory on the Proxmox node where the image will be downloaded and decompressed
+# This must match the directory layout for the "local" directory storage.
+openwrt_download_dir: "/var/lib/vz/images/{{ openwrt_template_vmid }}"
+
+# Hardware defaults for the template VM
+openwrt_template_memory_mb: 256
+openwrt_template_cores: 1
+openwrt_template_sockets: 1
+
+# Size of the OpenWRT root disk in GiB
+openwrt_rootdisk_size_gb: 4
+
+# Underlying block device for the root disk on local-lvm
+# Adjust VG name if needed (default Proxmox uses VG "pve")
+openwrt_rootdisk_device: "/dev/pve/vm-{{ openwrt_template_vmid }}-disk-0"
+
+# Idempotency marker file created after dd is done
+openwrt_rootdisk_dd_marker: "{{ openwrt_download_dir }}/.openwrt_rootdisk_dd_done"
+
+
+# Whether to disable TLS verification when talking to Proxmox API
+openwrt_proxmox_validate_certs: false

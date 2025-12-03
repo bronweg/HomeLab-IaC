@@ -1,0 +1,128 @@
+---
+# This file is included with loop from main.yml
+# It expects:
+# - proxmox_api_user
+# - proxmox_sops_tokens_existing (dict)
+# - proxmox_pve_tokens_existing (list)
+# - proxmox_api_tokens_final (dict)
+# - proxmox_token_name (loop_var)
+
+- name: Compute base state for current token
+  ansible.builtin.set_fact:
+    proxmox_token_exists_in_pve: "{{ proxmox_token_name in proxmox_pve_tokens_existing }}"
+    proxmox_token_secret_in_sops: >-
+      {{
+        proxmox_sops_tokens_existing
+        | default({}, true)
+        | dict2items
+        | selectattr('key', 'equalto', proxmox_token_name)
+        | map(attribute='value')
+        | first
+        | default({})
+        | json_query('token_secret')
+        | default('', true)
+      }}
+
+- name: Compute flag if token exists in SOPS
+  ansible.builtin.set_fact:
+    proxmox_token_exists_in_sops: "{{ proxmox_token_secret_in_sops | length > 0 }}"
+
+- name: Detect privilege separation state for current token in Proxmox
+  ansible.builtin.set_fact:
+    proxmox_token_privsep_in_pve: >-
+      {{
+        proxmox_pve_tokens_raw
+        | selectattr('tokenid', 'equalto', proxmox_api_user ~ '!' ~ proxmox_token_name)
+        | map(attribute='privsep')
+        | first
+        | default(false, true)
+      }}
+
+- name: Remove token in Proxmox if privilege separation is enabled
+  ansible.builtin.command:
+    cmd: >
+      pveum user token remove
+      {{ proxmox_api_user }}
+      {{ proxmox_token_name }}
+  when:
+    - proxmox_token_privsep_in_pve | bool
+
+- name: Reset token state after removal due to privilege separation
+  ansible.builtin.set_fact:
+    proxmox_token_exists_in_pve: false
+    proxmox_token_exists_in_sops: false
+    proxmox_token_secret_in_sops: ""
+  when:
+    - proxmox_token_privsep_in_pve | bool
+
+- name: Remove token in Proxmox if exists but has no secret in SOPS
+  ansible.builtin.command:
+    cmd: >
+      pveum user token remove
+      {{ proxmox_api_user }}
+      {{ proxmox_token_name }}
+  when:
+    - proxmox_token_exists_in_pve
+    - not proxmox_token_exists_in_sops
+
+- name: Recompute state after possible token removal
+  ansible.builtin.set_fact:
+    proxmox_token_exists_in_pve: "{{ proxmox_token_name in proxmox_pve_tokens_existing }}"
+
+- name: Fail if token exists only in SOPS but not in Proxmox
+  ansible.builtin.fail:
+    msg: >-
+      Token "{{ proxmox_token_name }}" exists in SOPS but not in Proxmox.
+      Clean it up in SOPS or create token manually, then rerun.
+  when:
+    - not proxmox_token_exists_in_pve
+    - proxmox_token_exists_in_sops
+
+- name: Create Proxmox API token when missing in both PVE and SOPS
+  ansible.builtin.command:
+    cmd: >
+      pveum user token add
+      {{ proxmox_api_user }}
+      {{ proxmox_token_name }}
+      -privsep 0
+      --output-format=json
+  register: proxmox_api_token_create_single
+  when:
+    - not proxmox_token_exists_in_pve
+    - not proxmox_token_exists_in_sops
+
+- name: Set token secret from newly created token
+  ansible.builtin.set_fact:
+    proxmox_token_secret_current: >-
+      {{
+        (proxmox_api_token_create_single.stdout | from_json)
+        | json_query('value')
+      }}
+  when:
+    - not proxmox_token_exists_in_pve
+    - not proxmox_token_exists_in_sops
+    - proxmox_api_token_create_single is defined
+    - proxmox_api_token_create_single.rc == 0
+
+- name: Set token secret from existing SOPS entry
+  ansible.builtin.set_fact:
+    proxmox_token_secret_current: "{{ proxmox_token_secret_in_sops }}"
+  when:
+    - proxmox_token_exists_in_pve
+    - proxmox_token_exists_in_sops
+
+- name: Update final tokens dict with current token
+  ansible.builtin.set_fact:
+    proxmox_api_tokens_final: >-
+      {{
+        proxmox_api_tokens_final
+        | combine(
+            {
+              proxmox_token_name: {
+                'token_id': proxmox_token_name,
+                'token_secret': proxmox_token_secret_current
+              }
+            },
+            recursive=True
+          )
+      }}

@@ -1,0 +1,13 @@
+---
+- name: Render /etc/network/interfaces for router Proxmox node
+  ansible.builtin.template:
+    src: interfaces.router.j2
+    dest: /etc/network/interfaces
+    owner: root
+    group: root
+    mode: '0644'
+    backup: true
+  tags: [pve_network]
+
+# Note: We intentionally do not restart networking here.
+# On a router node, network reload should be an explicit, controlled action.

@@ -1,0 +1,33 @@
+---
+# Default values for Proxmox API automation user and tokens
+
+# Automation user in Proxmox (realm pve)
+proxmox_api_user: "gitops@pve"
+
+# List of token names to manage for this user
+proxmox_api_token_names:
+  - "ansible"
+  - "terraform"
+
+# Role and path for the automation user
+proxmox_api_role: "PVEAdmin"
+proxmox_api_path: "/"
+
+# Cluster name must be provided by the caller (no default here).
+# Example: "home" or "prod".
+# proxmox_cluster_name: ""
+
+# SOPS-encrypted file to store Proxmox API config (per cluster)
+proxmox_api_sops_file: "{{ inventory_dir }}/group_vars/{{ proxmox_cluster_name }}.sops.yml"
+
+# Host to talk to via Proxmox API (you can override)
+proxmox_api_host: "{{ hostvars[inventory_hostname].ansible_host | default(inventory_hostname) }}"
+
+# API URL that will be written to SOPS (can be overridden in group_vars)
+proxmox_api_url: "https://{{ proxmox_api_host }}:8006/api2/json"
+
+# Admin API user to manage Proxmox accounts (must exist already)
+proxmox_api_admin_user: "root@pam"
+
+# Admin API password MUST be provided from outside (e.g. via SOPS) as
+# proxmox_api_admin_password

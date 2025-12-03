@@ -1,0 +1,170 @@
+---
+# 0. Validate required variables
+
+- name: Fail if proxmox_cluster_name is not defined
+  ansible.builtin.fail:
+    msg: "proxmox_cluster_name must be defined (cluster identifier used in SOPS filename)"
+  when: proxmox_cluster_name is not defined or proxmox_cluster_name | length == 0
+  run_once: true
+
+- name: Fail if proxmox_api_admin_password is not provided
+  ansible.builtin.fail:
+    msg: "proxmox_api_admin_password must be defined to manage Proxmox users via API"
+  when: proxmox_api_admin_password is not defined
+  run_once: true
+
+# 1. Basic facts and existing SOPS data
+
+- name: Set effective Proxmox API host (for clarity)
+  ansible.builtin.set_fact:
+    proxmox_api_host_effective: "{{ proxmox_api_host }}"
+  run_once: true
+
+- name: Check if Proxmox API SOPS file exists
+  ansible.builtin.stat:
+    path: "{{ proxmox_api_sops_file }}"
+  register: proxmox_api_sops_stat
+  delegate_to: localhost
+  run_once: true
+
+- name: Load existing Proxmox API SOPS data if present
+  community.sops.load_vars:
+    file: "{{ proxmox_api_sops_file }}"
+    name: proxmox_api_existing
+    config_path: "{{ inventory_dir | dirname }}/.sops.yaml"
+  when: proxmox_api_sops_stat.stat.exists
+  delegate_to: localhost
+  run_once: true
+
+- name: Set existing SOPS tokens dict
+  ansible.builtin.set_fact:
+    proxmox_sops_tokens_existing: >-
+      {{
+        (proxmox_api_existing.proxmox_api.tokens | default({}))
+        if proxmox_api_existing is defined
+        else {}
+      }}
+  run_once: true
+
+# 2. Ensure automation user exists via Proxmox API (using admin API user/password)
+
+- name: Ensure Proxmox automation user exists
+  community.proxmox.proxmox_user:
+    api_host: "{{ proxmox_api_host_effective }}"
+    api_user: "{{ proxmox_api_admin_user }}"
+    api_password: "{{ proxmox_api_admin_password }}"
+    userid: "{{ proxmox_api_user }}"
+    comment: "GitOps automation user"
+    enable: true
+    state: present
+    validate_certs: false
+  delegate_to: localhost
+  run_once: true
+
+# 3. Ensure ACL for this user on the desired path
+
+- name: Ensure ACL for automation user on cluster root
+  community.proxmox.proxmox_access_acl:
+    api_host: "{{ proxmox_api_host_effective }}"
+    api_user: "{{ proxmox_api_admin_user }}"
+    api_password: "{{ proxmox_api_admin_password }}"
+    path: "{{ proxmox_api_path }}"
+    ugid: "{{ proxmox_api_user }}"
+    type: user
+    roleid: "{{ proxmox_api_role }}"
+    state: present
+    validate_certs: false
+  delegate_to: localhost
+  run_once: true
+
+# 4. Get user info (including tokens) via API
+
+- name: Get Proxmox user info (including tokens)
+  community.proxmox.proxmox_user_info:
+    api_host: "{{ proxmox_api_host_effective }}"
+    api_user: "{{ proxmox_api_admin_user }}"
+    api_password: "{{ proxmox_api_admin_password }}"
+    userid: "{{ proxmox_api_user }}"
+    validate_certs: false
+  register: proxmox_user_info_result
+  delegate_to: localhost
+  run_once: true
+
+- name: Store raw tokens list from Proxmox
+  ansible.builtin.set_fact:
+    proxmox_pve_tokens_raw: >-
+      {{
+        proxmox_user_info_result.proxmox_users[0].tokens
+        | default([], true)
+      }}
+  when:
+    - proxmox_user_info_result.proxmox_users is defined
+    - proxmox_user_info_result.proxmox_users | length > 0
+  run_once: true
+
+- name: Build list of existing token names in Proxmox
+  ansible.builtin.set_fact:
+    proxmox_pve_tokens_existing: >-
+      {{
+        (
+          proxmox_user_info_result.proxmox_users[0].tokens
+          | default([], true)
+        )
+        | map(attribute='tokenid')
+        | map('regex_replace', '.*!', '')
+        | list
+      }}
+  when:
+    - proxmox_user_info_result.proxmox_users is defined
+    - proxmox_user_info_result.proxmox_users | length > 0
+  run_once: true
+
+- name: Ensure proxmox_pve_tokens_existing is always defined
+  ansible.builtin.set_fact:
+    proxmox_pve_tokens_existing: "{{ proxmox_pve_tokens_existing | default([]) }}"
+  run_once: true
+
+# 5. Initialize final tokens dict
+
+- name: Initialize final tokens dict
+  ansible.builtin.set_fact:
+    proxmox_api_tokens_final: "{{ proxmox_sops_tokens_existing }}"
+  run_once: true
+
+# 6. Ensure each requested token is consistent and present
+
+- name: Ensure proxmox_pve_tokens_raw is always defined
+  ansible.builtin.set_fact:
+    proxmox_pve_tokens_raw: "{{ proxmox_pve_tokens_raw | default([]) }}"
+  run_once: true
+
+- name: Ensure Proxmox API tokens for requested names
+  ansible.builtin.include_tasks: ensure_single_token.yml
+  loop: "{{ proxmox_api_token_names }}"
+  loop_control:
+    loop_var: proxmox_token_name
+  run_once: true
+
+# 7. Build final proxmox_api structure for SOPS
+
+- name: Build Proxmox API config structure
+  ansible.builtin.set_fact:
+    proxmox_api_final:
+      proxmox_api:
+        cluster_name: "{{ proxmox_cluster_name }}"
+        url: "{{ proxmox_api_url }}"
+        user: "{{ proxmox_api_user }}"
+        tokens: "{{ proxmox_api_tokens_final }}"
+  run_once: true
+
+# 8. Write/update SOPS-encrypted group_vars file on control node
+
+- name: Write Proxmox API config to SOPS-encrypted file
+  community.sops.sops_encrypt:
+    path: "{{ proxmox_api_sops_file }}"
+    content_yaml: "{{ proxmox_api_final }}"
+    force: true
+    config_path: "{{ inventory_dir | dirname }}/.sops.yaml"
+  delegate_to: localhost
+  run_once: true
+  no_log: true

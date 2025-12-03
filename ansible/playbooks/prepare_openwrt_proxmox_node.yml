@@ -1,0 +1,13 @@
+---
+- name: Prepare OpenWRT template on router Proxmox node
+  hosts: router-pve
+  become: true
+  collections:
+    - community.proxmox
+
+  vars:
+    proxmox_cluster_name: "router-proxmox"
+
+  roles:
+    #- role: proxmox_pve_repos
+    - role: proxmox_openwrt_template

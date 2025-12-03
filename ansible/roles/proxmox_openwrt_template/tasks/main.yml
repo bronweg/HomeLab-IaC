@@ -1,0 +1,267 @@
+---
+# ---------------------------------------------------------------------------
+# Ensure that proxmox_api dict is available (provided by SOPS vars plugin)
+# ---------------------------------------------------------------------------
+
+- name: "Assert that proxmox_api dict is defined"
+  ansible.builtin.assert:
+    that:
+      - proxmox_api is defined
+      - proxmox_api.tokens is defined
+      - proxmox_api.tokens.ansible is defined
+    fail_msg: >-
+      proxmox_api dict is not defined. Make sure SOPS vars for Proxmox API
+      are loaded (for example from inventory/group_vars/router-pve.sops.yml)
+      and that this host is in the router-pve group.
+  tags: [openwrt_template, proxmox, router]
+
+- name: "Extract flat Proxmox API variables from proxmox_api dict"
+  ansible.builtin.set_fact:
+    proxmox_api_url: "{{ proxmox_api.url }}"
+    proxmox_api_user: "{{ proxmox_api.user }}"
+    proxmox_api_token_id: "{{ proxmox_api.tokens.ansible.token_id }}"
+    proxmox_api_token_secret: "{{ proxmox_api.tokens.ansible.token_secret }}"
+  no_log: true
+  tags: [openwrt_template, proxmox, router]
+
+# ---------------------------------------------------------------------------
+# Prepare OpenWRT image on the Proxmox node (router1)
+# ---------------------------------------------------------------------------
+
+- name: "Ensure OpenWRT download directory exists on Proxmox node"
+  ansible.builtin.file:
+    path: "{{ openwrt_download_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags: [openwrt_template, proxmox, router]
+
+- name: "Download OpenWRT compressed image (.img.gz) to Proxmox node"
+  ansible.builtin.get_url:
+    url: "{{ openwrt_image_url }}"
+    dest: "{{ openwrt_download_dir }}/{{ openwrt_image_filename_gz }}"
+    owner: root
+    group: root
+    mode: "0644"
+    force: false
+  tags: [openwrt_template, proxmox, router]
+
+- name: "Decompress OpenWRT image if raw file is missing"
+  ansible.builtin.command:
+    cmd: "gunzip -kf {{ openwrt_image_filename_gz }}"
+  args:
+    chdir: "{{ openwrt_download_dir }}"
+    creates: "{{ openwrt_download_dir }}/{{ openwrt_image_filename_raw }}"
+  register: openwrt_gunzip_result
+  failed_when: >
+    openwrt_gunzip_result.rc != 0 and
+    'trailing garbage ignored' not in (openwrt_gunzip_result.stderr | default(''))
+  tags: [openwrt_template, proxmox, router]
+
+# ---------------------------------------------------------------------------
+# All Proxmox API operations are done from the Ansible controller
+# ---------------------------------------------------------------------------
+
+- name: "Work with Proxmox API to create/update OpenWRT template"
+  delegate_to: localhost
+  run_once: true
+  tags: [openwrt_template, proxmox, router]
+  block:
+
+    - name: "Derive Proxmox API host"
+      ansible.builtin.set_fact:
+        proxmox_api_host_derived: >-
+          {{
+            (proxmox_api_url | default(inventory_hostname))
+            | regex_replace('^https?://', '')
+            | regex_replace('/.*$', '')
+          }}
+
+    # -----------------------------------------------------------------------
+    # Check whether the OpenWRT template VM already exists
+    # -----------------------------------------------------------------------
+
+    - name: "Get information about OpenWRT template VM (if any)"
+      community.proxmox.proxmox_vm_info:
+        api_host: "{{ proxmox_api_host_derived }}"
+        api_user: "{{ proxmox_api_user }}"
+        api_token_id: "{{ proxmox_api_token_id }}"
+        api_token_secret: "{{ proxmox_api_token_secret }}"
+        validate_certs: "{{ openwrt_proxmox_validate_certs }}"
+        node: "{{ openwrt_template_node }}"
+        type: qemu
+        vmid: "{{ openwrt_template_vmid }}"
+      register: openwrt_template_info
+      failed_when: false
+
+    - name: "Derive template existence flags"
+      ansible.builtin.set_fact:
+        openwrt_template_exists: >-
+          {{ (openwrt_template_info.proxmox_vms | default([])) | length > 0 }}
+        openwrt_template_is_template: >-
+          {{
+            (openwrt_template_info.proxmox_vms | default([])) | length > 0
+            and (openwrt_template_info.proxmox_vms[0].template | default(false))
+          }}
+
+    # -----------------------------------------------------------------------
+    # Create minimal VM shell if it does not exist yet
+    # -----------------------------------------------------------------------
+
+    - name: "Ensure OpenWRT template VM shell exists"
+      community.proxmox.proxmox_kvm:
+        api_host: "{{ proxmox_api_host_derived }}"
+        api_user: "{{ proxmox_api_user }}"
+        api_token_id: "{{ proxmox_api_token_id }}"
+        api_token_secret: "{{ proxmox_api_token_secret }}"
+        validate_certs: "{{ openwrt_proxmox_validate_certs }}"
+
+        vmid: "{{ openwrt_template_vmid }}"
+        node: "{{ openwrt_template_node }}"
+        name: "{{ openwrt_template_name }}"
+
+        ostype: "l26"
+        memory: "{{ openwrt_template_memory_mb }}"
+        cores: "{{ openwrt_template_cores }}"
+        sockets: "{{ openwrt_template_sockets }}"
+        scsihw: "virtio-scsi-single"
+        onboot: false
+
+        state: present
+      when: not openwrt_template_exists
+
+    # -----------------------------------------------------------------------
+    # Ensure OpenWRT root disk exists and is attached as scsi0
+    # -----------------------------------------------------------------------
+
+    - name: "Ensure OpenWRT root disk exists on scsi0"
+      community.proxmox.proxmox_disk:
+        api_host: "{{ proxmox_api_host_derived }}"
+        api_user: "{{ proxmox_api_user }}"
+        api_token_id: "{{ proxmox_api_token_id }}"
+        api_token_secret: "{{ proxmox_api_token_secret }}"
+        validate_certs: "{{ openwrt_proxmox_validate_certs }}"
+
+        vmid: "{{ openwrt_template_vmid }}"
+        disk: "scsi0"
+        storage: "{{ openwrt_rootdisk_storage_id }}"
+        size: "{{ openwrt_rootdisk_size_gb }}"
+        format: "raw"
+
+        state: present
+      register: openwrt_rootdisk_result
+
+    # -----------------------------------------------------------------------ize
+    # Ensure boot order and basic HW settings are correct
+    # -----------------------------------------------------------------------
+
+    - name: "Ensure OpenWRT template boot order is scsi0"
+      community.proxmox.proxmox_kvm:
+        api_host: "{{ proxmox_api_host_derived }}"
+        api_user: "{{ proxmox_api_user }}"
+        api_token_id: "{{ proxmox_api_token_id }}"
+        api_token_secret: "{{ proxmox_api_token_secret }}"
+        validate_certs: "{{ openwrt_proxmox_validate_certs }}"
+
+        vmid: "{{ openwrt_template_vmid }}"
+        node: "{{ openwrt_template_node }}"
+
+        scsihw: "virtio-scsi-single"
+        boot: "order=scsi0"
+
+        state: present
+        update: true
+
+    - name: "Ensure serial console is configured for OpenWRT template"
+      community.proxmox.proxmox_kvm:
+        api_host: "{{ proxmox_api_host_derived }}"
+        api_user: "{{ proxmox_api_user }}"
+        api_token_id: "{{ proxmox_api_token_id }}"
+        api_token_secret: "{{ proxmox_api_token_secret }}"
+        validate_certs: "{{ openwrt_proxmox_validate_certs }}"
+
+        vmid: "{{ openwrt_template_vmid }}"
+        node: "{{ openwrt_template_node }}"
+
+        serial:
+          serial0: "socket"
+        vga: "serial0"
+
+        state: present
+        update: true
+
+    # -----------------------------------------------------------------------
+    # Convert VM to template (only if not already a template)
+    # -----------------------------------------------------------------------
+
+    - name: "Refresh VM info after disk import"
+      community.proxmox.proxmox_vm_info:
+        api_host: "{{ proxmox_api_host_derived }}"
+        api_user: "{{ proxmox_api_user }}"
+        api_token_id: "{{ proxmox_api_token_id }}"
+        api_token_secret: "{{ proxmox_api_token_secret }}"
+        validate_certs: "{{ openwrt_proxmox_validate_certs }}"
+        node: "{{ openwrt_template_node }}"
+        type: qemu
+        vmid: "{{ openwrt_template_vmid }}"
+      register: openwrt_template_info_after
+      failed_when: false
+
+    - name: "Derive final template flag"
+      ansible.builtin.set_fact:
+        openwrt_template_is_template_final: >-
+          {{
+            (openwrt_template_info_after.proxmox_vms | default([])) | length > 0
+            and (openwrt_template_info_after.proxmox_vms[0].template | default(false))
+          }}
+
+    - name: "Convert OpenWRT VM into Proxmox template"
+      ansible.builtin.command:
+        cmd: "qm template {{ openwrt_template_vmid }}"
+      delegate_to: "{{ inventory_hostname }}"
+      become: true
+      when:
+        - (openwrt_template_info_after.proxmox_vms | default([])) | length > 0
+        - not openwrt_template_is_template_final
+
+# ---------------------------------------------------------------------------
+# Write OpenWRT image into the root disk on the Proxmox node
+# ---------------------------------------------------------------------------
+
+- name: "Check current VM config (to see if scsi0 exists)"
+  ansible.builtin.command: "qm config {{ openwrt_template_vmid }}"
+  register: openwrt_qm_config
+  changed_when: false
+  failed_when: openwrt_qm_config.rc != 0
+  delegate_to: "{{ openwrt_template_node }}"
+  become: true
+  tags: [openwrt_template, proxmox, router]
+
+- name: "Write OpenWRT image into VM root disk via dd (one-time)"
+  ansible.builtin.command: >
+    dd if={{ openwrt_download_dir }}/{{ openwrt_image_filename_raw }}
+       of={{ openwrt_rootdisk_device }}
+       bs=4M
+       conv=fsync
+  args:
+    creates: "{{ openwrt_rootdisk_dd_marker }}"
+  delegate_to: "{{ openwrt_template_node }}"
+  become: true
+  when:
+    - "'scsi0:' in openwrt_qm_config.stdout"
+  tags: [openwrt_template, proxmox, router]
+
+- name: "Create idempotency marker for dd"
+  ansible.builtin.file:
+    path: "{{ openwrt_rootdisk_dd_marker }}"
+    state: touch
+    owner: root
+    group: root
+    mode: "0644"
+  delegate_to: "{{ openwrt_template_node }}"
+  become: true
+  when:
+    - "'scsi0:' in openwrt_qm_config.stdout"
+    - not (openwrt_rootdisk_dd_marker is exists)
+  tags: [openwrt_template, proxmox, router]
