@@ -1,0 +1,19 @@
+---
+# Where to place generated tfvars file (relative to ansible playbook dir).00.
+proxmox_router_tfvars_dest_dir: "{{ playbook_dir }}/../../tofu/router-proxmox"
+proxmox_router_tfvars_dest_file: "{{ proxmox_router_tfvars_dest_dir }}/router.auto.tfvars.json"
+
+proxmox_cluster_name: "{{ proxmox_cluster_name | default('router-pve') }}"
+proxmox_node_name: "{{ proxmox_node_name | default('router1') }}"
+
+proxmox_openwrt_template_vmid: "{{ proxmox_openwrt_template_vmid | default(9000) }}"
+proxmox_openwrt_template_node_name: "{{ proxmox_openwrt_template_node_name | default(proxmox_node_name) }}"
+proxmox_openwrt_template_name: "{{ proxmox_openwrt_template_name }}"
+
+proxmox_router_vm_vmid: "{{ proxmox_router_vm_vmid | default(101) }}"
+proxmox_router_vm_name: "{{ proxmox_router_vm_name | default('router-openwrt-main') }}"
+proxmox_router_vm_memory_mb: "{{ proxmox_router_vm_memory_mb | default(512) }}"
+proxmox_router_vm_cores: "{{ proxmox_router_vm_cores | default(2) }}"
+
+proxmox_wan_bridge: "{{ proxmox_wan_bridge | default('vmbr_wan') }}"
+proxmox_lan_bridge: "{{ proxmox_lan_bridge | default('vmbr_lan_trunk') }}"

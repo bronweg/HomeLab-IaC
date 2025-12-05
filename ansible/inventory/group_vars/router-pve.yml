@@ -1,0 +1,16 @@
+proxmox_cluster_name: "router-pve"
+proxmox_node_name: "router1"
+openwrt_version: "23.05.5"
+proxmox_openwrt_template_name: "tpl-openwrt-{{ openwrt_version }}"
+
+proxmox_openwrt_template_vmid: 9000
+proxmox_openwrt_template_node_name: "{{ proxmox_node_name }}"
+
+# For terraforming the router VM from the OpenWRT template
+proxmox_router_vm_vmid: 101
+proxmox_router_vm_name: "router-openwrt-main"
+proxmox_router_vm_memory_mb: 512
+proxmox_router_vm_cores: 2
+
+proxmox_wan_bridge: "vmbr_wan"
+proxmox_lan_bridge: "vmbr_lan_trunk"

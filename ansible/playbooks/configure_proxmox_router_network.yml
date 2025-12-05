@@ -1,0 +1,10 @@
+---
+- name: Prepare OpenWRT template on router Proxmox node
+  hosts: router-pve
+  become: true
+
+  vars:
+    pve_network_apply: true
+
+  roles:
+    - role: proxmox_router_network

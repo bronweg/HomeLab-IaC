@@ -1,0 +1,20 @@
+---
+- name: "Ensure tofu directory for router tfvars exists (on controller)"
+  ansible.builtin.file:
+    path: "{{ proxmox_router_tfvars_dest_dir }}"
+    state: directory
+    mode: "0755"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags: [router_tfvars, tofu]
+
+- name: "Render router.auto.tfvars.json for OpenTofu"
+  ansible.builtin.template:
+    src: "router.auto.tfvars.json.j2"
+    dest: "{{ proxmox_router_tfvars_dest_file }}"
+    mode: "0666"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags: [router_tfvars, tofu]

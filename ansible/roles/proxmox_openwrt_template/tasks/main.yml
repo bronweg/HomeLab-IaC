@@ -152,7 +152,7 @@
         state: present
       register: openwrt_rootdisk_result
 
-    # -----------------------------------------------------------------------ize
+    # -----------------------------------------------------------------------
     # Ensure boot order and basic HW settings are correct
     # -----------------------------------------------------------------------
 
@@ -195,7 +195,7 @@
     # Convert VM to template (only if not already a template)
     # -----------------------------------------------------------------------
 
-    - name: "Refresh VM info after disk import"
+    - name: "Refresh VM info after disk creation"
       community.proxmox.proxmox_vm_info:
         api_host: "{{ proxmox_api_host_derived }}"
         api_user: "{{ proxmox_api_user }}"
@@ -226,7 +226,7 @@
         - not openwrt_template_is_template_final
 
 # ---------------------------------------------------------------------------
-# Write OpenWRT image into the root disk on the Proxmox node
+# Write OpenWRT image into the root disk on the Proxmox node (one-time)
 # ---------------------------------------------------------------------------
 
 - name: "Check current VM config (to see if scsi0 exists)"
@@ -238,18 +238,34 @@
   become: true
   tags: [openwrt_template, proxmox, router]
 
+- name: "Remove OpenWRT rootdisk dd marker if recreate_image is true"
+  ansible.builtin.file:
+    path: "{{ openwrt_rootdisk_dd_marker }}"
+    state: absent
+  delegate_to: "{{ openwrt_template_node }}"
+  become: true
+  when: openwrt_recreate_image | default(false) | bool
+  tags: [openwrt_template, proxmox, router]
+
+- name: "Check if OpenWRT rootdisk dd marker exists"
+  ansible.builtin.stat:
+    path: "{{ openwrt_rootdisk_dd_marker }}"
+  register: openwrt_dd_marker_stat
+  delegate_to: "{{ openwrt_template_node }}"
+  become: true
+  tags: [openwrt_template, proxmox, router]
+
 - name: "Write OpenWRT image into VM root disk via dd (one-time)"
   ansible.builtin.command: >
     dd if={{ openwrt_download_dir }}/{{ openwrt_image_filename_raw }}
        of={{ openwrt_rootdisk_device }}
        bs=4M
        conv=fsync
-  args:
-    creates: "{{ openwrt_rootdisk_dd_marker }}"
   delegate_to: "{{ openwrt_template_node }}"
   become: true
   when:
     - "'scsi0:' in openwrt_qm_config.stdout"
+    - not openwrt_dd_marker_stat.stat.exists
   tags: [openwrt_template, proxmox, router]
 
 - name: "Create idempotency marker for dd"
@@ -263,5 +279,5 @@
   become: true
   when:
     - "'scsi0:' in openwrt_qm_config.stdout"
-    - not (openwrt_rootdisk_dd_marker is exists)
+    - not openwrt_dd_marker_stat.stat.exists
   tags: [openwrt_template, proxmox, router]

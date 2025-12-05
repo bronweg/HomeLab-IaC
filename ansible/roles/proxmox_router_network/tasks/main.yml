@@ -9,5 +9,9 @@
     backup: true
   tags: [pve_network]
 
-# Note: We intentionally do not restart networking here.
-# On a router node, network reload should be an explicit, controlled action.
+- name: Restart networking service on router Proxmox node
+  ansible.builtin.service:
+    name: networking
+    state: restarted
+  when: pve_network_apply | default(false) | bool
+  tags: [pve_network_apply]

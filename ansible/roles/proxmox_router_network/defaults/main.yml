@@ -1,14 +1,20 @@
 ---
 # Physical interface used for WAN bridge
-pve_wan_iface: eno0
+pve_wan_iface: nic0
 
 # Physical interface used for LAN trunk bridge
-pve_lan_iface: eno1
+pve_lan_iface: nic1
+
+# Optional emergency interface that always uses DHCP and stays outside bridges
+pve_emergency_iface: nic2
+pve_enable_emergency_iface: true
 
 # Management IP for Proxmox host (on VLAN 61 via vmbr-lan)
 pve_mgmt_address: 192.168.61.2
 pve_mgmt_netmask: 255.255.255.0
 pve_mgmt_gateway: 192.168.61.1
+
+pve_bootstrap_gateway_on_emergency: true
 
 # VLAN IDs carried on the LAN trunk bridge (vmbr-lan)
 pve_lan_vlans:

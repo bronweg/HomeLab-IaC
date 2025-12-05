@@ -1,0 +1,9 @@
+---
+- name: Generate OpenTofu tfvars for router VM
+  hosts: router-pve
+  gather_facts: false
+  become: false
+
+  roles:
+    - role: proxmox_router_tfvars
+      tags: [router_tfvars, tofu]
