@@ -17,6 +17,7 @@
       - htop
       - curl
       - wget
+      - parted
       - git
       - net-tools
       - ethtool

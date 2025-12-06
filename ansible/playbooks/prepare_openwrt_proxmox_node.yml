@@ -6,8 +6,7 @@
     - community.proxmox
 
   vars:
-    proxmox_cluster_name: "router-proxmox"
+    proxmox_cluster_name: "router-pve"
 
   roles:
-    #- role: proxmox_pve_repos
     - role: proxmox_openwrt_template

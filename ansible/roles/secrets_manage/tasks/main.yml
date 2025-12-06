@@ -74,6 +74,7 @@
     path: "{{ host_key_base }}"
     type: "{{ secrets_ansible_key_type }}"
     mode: "0600"
+    owner: "{{ lookup('ansible.builtin.env', 'USER') }}"
   when: secrets_regen_ssh_keys | bool
         or secrets_data.ssh_keys.ansible.private is none
         or secrets_data.ssh_keys.ansible.public is none

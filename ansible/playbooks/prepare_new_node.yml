@@ -11,15 +11,14 @@
 
 - name: Bootstrap ansible user and root
   hosts: "{{ target }}"
-  become: true
   vars:
     ansible_user: root
   roles:
     - role: secrets_manage
-      become: false
       tags:
         - "secrets"
     - role: bootstrap_user
+      become: true
       tags:
         - "bootstrap"
 

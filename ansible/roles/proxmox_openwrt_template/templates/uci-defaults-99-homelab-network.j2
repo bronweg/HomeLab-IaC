@@ -1,0 +1,46 @@
+#!/bin/sh
+# First-boot network setup for Homelab router
+# This script is executed once by OpenWRT from /etc/uci-defaults
+
+uci -q batch <<EOF
+set network.lan='interface'
+set network.lan.device='{{ openwrt_lan_device }}'
+set network.lan.proto='static'
+set network.lan.ipaddr='{{ openwrt_lan_ipaddr }}'
+set network.lan.netmask='{{ openwrt_lan_netmask }}'
+
+set network.wan='interface'
+set network.wan.device='{{ openwrt_wan_device }}'
+set network.wan.proto='{{ openwrt_wan_proto }}'
+
+set dhcp.lan='dhcp'
+set dhcp.lan.interface='lan'
+set dhcp.lan.start='{{ openwrt_lan_dhcp_start }}'
+set dhcp.lan.limit='{{ openwrt_lan_dhcp_limit }}'
+set dhcp.lan.leasetime='{{ openwrt_lan_dhcp_leasetime }}'
+
+set firewall.lan='zone'
+set firewall.lan.name='lan'
+set firewall.lan.input='ACCEPT'
+set firewall.lan.output='ACCEPT'
+set firewall.lan.forward='ACCEPT'
+set firewall.lan.network='lan'
+
+set firewall.wan='zone'
+set firewall.wan.name='wan'
+set firewall.wan.input='REJECT'
+set firewall.wan.output='ACCEPT'
+set firewall.wan.forward='REJECT'
+set firewall.wan.masq='1'
+set firewall.wan.mtu_fix='1'
+set firewall.wan.network='wan wan6'
+
+set dropbear.@dropbear[0].Interface='lan'
+EOF
+
+uci commit
+/etc/init.d/network restart
+/etc/init.d/firewall restart
+
+# Remove this script after successful run (uci-defaults usually does this)
+rm -f /etc/uci-defaults/99-homelab-network

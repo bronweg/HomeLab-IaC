@@ -97,9 +97,9 @@
 
     - name: "Derive template existence flags"
       ansible.builtin.set_fact:
-        openwrt_template_exists: >-
+        tpl_exists: >-
           {{ (openwrt_template_info.proxmox_vms | default([])) | length > 0 }}
-        openwrt_template_is_template: >-
+        tpl_is_template: >-
           {{
             (openwrt_template_info.proxmox_vms | default([])) | length > 0
             and (openwrt_template_info.proxmox_vms[0].template | default(false))
@@ -129,7 +129,7 @@
         onboot: false
 
         state: present
-      when: not openwrt_template_exists
+      when: not tpl_exists
 
     # -----------------------------------------------------------------------
     # Ensure OpenWRT root disk exists and is attached as scsi0
@@ -208,9 +208,9 @@
       register: openwrt_template_info_after
       failed_when: false
 
-    - name: "Derive final template flag"
+    - name: "Detect final template state"
       ansible.builtin.set_fact:
-        openwrt_template_is_template_final: >-
+        tpl_is_template_final: >-
           {{
             (openwrt_template_info_after.proxmox_vms | default([])) | length > 0
             and (openwrt_template_info_after.proxmox_vms[0].template | default(false))
@@ -223,7 +223,7 @@
       become: true
       when:
         - (openwrt_template_info_after.proxmox_vms | default([])) | length > 0
-        - not openwrt_template_is_template_final
+        - not tpl_is_template_final
 
 # ---------------------------------------------------------------------------
 # Write OpenWRT image into the root disk on the Proxmox node (one-time)
@@ -238,13 +238,13 @@
   become: true
   tags: [openwrt_template, proxmox, router]
 
-- name: "Remove OpenWRT rootdisk dd marker if recreate_image is true"
+- name: "Remove dd marker if recreate_image is true"
   ansible.builtin.file:
     path: "{{ openwrt_rootdisk_dd_marker }}"
     state: absent
   delegate_to: "{{ openwrt_template_node }}"
   become: true
-  when: openwrt_recreate_image | default(false) | bool
+  when: (openwrt_recreate_image | default(false)) | bool
   tags: [openwrt_template, proxmox, router]
 
 - name: "Check if OpenWRT rootdisk dd marker exists"
@@ -280,4 +280,99 @@
   when:
     - "'scsi0:' in openwrt_qm_config.stdout"
     - not openwrt_dd_marker_stat.stat.exists
+  tags: [openwrt_template, proxmox, router]
+
+# ---------------------------------------------------------------------------
+# Inspect partition table and compute root offset (partition 2)
+# ---------------------------------------------------------------------------
+
+- name: "Read partition table info for OpenWRT root disk"
+  community.general.parted:
+    device: "{{ openwrt_rootdisk_device }}"
+    unit: B
+    state: info
+  register: openwrt_part_info
+  delegate_to: "{{ openwrt_template_node }}"
+  become: true
+  tags: [openwrt_template, proxmox, router]
+
+- name: "Compute OpenWRT root offset (partition 2 start in bytes)"
+  ansible.builtin.set_fact:
+    openwrt_root_offset_bytes: >-
+      {{
+        (
+          openwrt_part_info.partitions
+          | selectattr('num', 'equalto', 2)
+          | first
+        ).begin
+        | regex_replace('B$', '')
+        | int
+      }}
+  delegate_to: "{{ openwrt_template_node }}"
+  tags: [openwrt_template, proxmox, router]
+
+# ---------------------------------------------------------------------------
+# Mount OpenWRT root filesystem, patch config, unmount
+# ---------------------------------------------------------------------------
+
+- name: "Ensure OpenWRT root mount directory exists"
+  ansible.builtin.file:
+    path: "{{ openwrt_root_mount_path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  delegate_to: "{{ openwrt_template_node }}"
+  become: true
+  tags: [openwrt_template, proxmox, router]
+
+- name: "Attach loop device for OpenWRT root partition"
+  ansible.builtin.command: >
+    losetup --find --show
+    --offset {{ openwrt_root_offset_bytes }}
+    {{ openwrt_rootdisk_device }}
+  register: openwrt_loop_device
+  changed_when: openwrt_loop_device.rc == 0
+  failed_when: openwrt_loop_device.rc != 0
+  delegate_to: "{{ openwrt_template_node }}"
+  become: true
+  tags: [openwrt_template, proxmox, router]
+
+- name: "Mount OpenWRT root filesystem"
+  ansible.posix.mount:
+    path: "{{ openwrt_root_mount_path }}"
+    src: "{{ openwrt_loop_device.stdout }}"
+    fstype: ext4
+    state: mounted
+  delegate_to: "{{ openwrt_template_node }}"
+  become: true
+  tags: [openwrt_template, proxmox, router]
+
+- name: "Render OpenWRT /etc/config/network for first boot"
+  ansible.builtin.template:
+    src: "openwrt-network.j2"
+    dest: "{{ openwrt_root_mount_path }}/etc/config/network"
+    owner: root
+    group: root
+    mode: "0644"
+  delegate_to: "{{ openwrt_template_node }}"
+  become: true
+  tags: [openwrt_template, proxmox, router]
+
+- name: "Unmount OpenWRT root filesystem"
+  ansible.posix.mount:
+    path: "{{ openwrt_root_mount_path }}"
+    state: unmounted
+  delegate_to: "{{ openwrt_template_node }}"
+  become: true
+  tags: [openwrt_template, proxmox, router]
+
+- name: "Detach loop device for OpenWRT root partition"
+  ansible.builtin.command: >
+    losetup -d {{ openwrt_loop_device.stdout }}
+  register: openwrt_loop_detach
+  changed_when: openwrt_loop_detach.rc == 0
+  failed_when: openwrt_loop_detach.rc != 0
+  delegate_to: "{{ openwrt_template_node }}"
+  become: true
   tags: [openwrt_template, proxmox, router]

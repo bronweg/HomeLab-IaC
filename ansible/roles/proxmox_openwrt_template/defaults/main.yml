@@ -46,3 +46,23 @@ openwrt_recreate_image: false
 
 # Whether to disable TLS verification when talking to Proxmox API
 openwrt_proxmox_validate_certs: false
+
+# Temporary mount point for OpenWRT root filesystem on the Proxmox node
+openwrt_root_mount_path: "/mnt/openwrt-root-{{ openwrt_template_vmid }}"
+
+# Partition number inside the combined image that contains the root filesystem
+openwrt_root_partition_number: 2
+
+# LAN settings for first boot (LAN must be on eth1)
+openwrt_lan_device: "eth1"
+openwrt_lan_ipaddr: "192.168.61.1"
+openwrt_lan_netmask: "255.255.255.0"
+
+# LAN DHCP settings
+openwrt_lan_dhcp_start: "100"
+openwrt_lan_dhcp_limit: "150"
+openwrt_lan_dhcp_leasetime: "12h"
+
+# WAN settings for first boot (WAN on eth0 via DHCP)
+openwrt_wan_device: "eth0"
+openwrt_wan_proto: "dhcp"

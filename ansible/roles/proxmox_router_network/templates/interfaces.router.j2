@@ -38,9 +38,3 @@ iface {{ proxmox_lan_bridge }} inet static
     bridge-fd 0
     bridge-vlan-aware yes
     bridge-vids {{ pve_lan_vlans | join(' ') }}
-
-######## EMERGENCY / SAFETY INTERFACE (DHCP) ########
-{% if pve_enable_emergency_iface %}
-auto {{ pve_emergency_iface }}
-iface {{ pve_emergency_iface }} inet dhcp
-{% endif %}
