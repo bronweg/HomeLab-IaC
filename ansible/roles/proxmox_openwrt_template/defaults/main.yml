@@ -54,9 +54,9 @@ openwrt_root_mount_path: "/mnt/openwrt-root-{{ openwrt_template_vmid }}"
 openwrt_root_partition_number: 2
 
 # LAN settings for first boot (LAN must be on eth1)
-openwrt_lan_device: "eth1"
-openwrt_lan_ipaddr: "192.168.61.1"
-openwrt_lan_netmask: "255.255.255.0"
+openwrt_lan_device: "{{ openwrt_lan_device | default('eth1') }}"
+openwrt_lan_ipaddr: "{{ openwrt_lan_ipaddr | default('192.168.61.1') }}"
+openwrt_lan_netmask: "{{ openwrt_lan_netmask | default('255.255.255.0') }}"
 
 # LAN DHCP settings
 openwrt_lan_dhcp_start: "100"

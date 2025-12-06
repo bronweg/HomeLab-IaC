@@ -1,0 +1,7 @@
+"all":
+  "children":
+    "management":
+      "hosts":
+        "router-openwrt-main":
+          "ansible_host": "192.168.61.1"
+          "ansible_user": "root"

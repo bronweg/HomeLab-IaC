@@ -14,3 +14,8 @@ proxmox_router_vm_cores: 2
 
 proxmox_wan_bridge: "vmbr_wan"
 proxmox_lan_bridge: "vmbr_lan_trunk"
+
+# LAN settings for first boot (LAN must be on eth1)
+openwrt_lan_device: "eth1"
+openwrt_lan_ipaddr: "192.168.61.1"
+openwrt_lan_netmask: "255.255.255.0"

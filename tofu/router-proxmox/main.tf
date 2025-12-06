@@ -84,3 +84,28 @@ resource "proxmox_virtual_environment_vm" "router" {
     device = "socket"
   }
 }
+
+resource "local_file" "ansible_inventory_router" {
+  filename = "${path.module}/../../ansible/inventory/management/management.yml"
+
+  content = yamlencode({
+    all = {
+      children = {
+        management = {
+          hosts = {
+            (var.router_vm_name) = {
+              ansible_host = var.openwrt_lan_ipaddr
+              ansible_user = "root"
+            }
+          }
+        }
+      }
+    }
+  })
+
+  file_permission = "0644"
+
+  depends_on = [
+    proxmox_virtual_environment_vm.router
+  ]
+}

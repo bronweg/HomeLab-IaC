@@ -52,3 +52,8 @@ variable "lan_bridge" {
   type        = string
   description = "Proxmox bridge for LAN trunk interface"
 }
+
+variable "openwrt_lan_ipaddr" {
+  type        = string
+  description = "LAN (management VLAN) IP address of the router (OpenWRT)"
+}
